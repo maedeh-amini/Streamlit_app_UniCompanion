@@ -146,7 +146,7 @@ def initialize_next_block():
     st.session_state.current_q_index = 0
     st.session_state.current_page = "question_eval"
 
-# UPDATED: Construct and append a dictionary for each question rated
+# Construct and append a dictionary for each question rated
 def next_question(faith_score, rel_score, recall_score, prec_score):
     q_item = st.session_state.active_questions[st.session_state.current_q_index]
     block_name = st.session_state.active_pipeline
@@ -154,7 +154,7 @@ def next_question(faith_score, rel_score, recall_score, prec_score):
     # Attempt to fetch a question_id, default to the index if it doesn't exist in the JSON
     q_id = q_item.get("question_id", st.session_state.current_q_index)
     
-    # Build the dictionary exactly as requested
+    # Build the dictionary 
     interaction_record = {
         "block_sequence_position": st.session_state.current_run,
         "assigned_pipeline": block_name,
@@ -176,7 +176,7 @@ def next_question(faith_score, rel_score, recall_score, prec_score):
     else:
         st.session_state.current_page = "pipeline_survey"
 
-# UPDATED: Format the survey dictionary as requested
+# Format the survey dictionary 
 def submit_pipeline_survey(survey_scores):
     survey_data = {
         "block_sequence_position": st.session_state.current_run,
@@ -196,7 +196,7 @@ def submit_pipeline_survey(survey_scores):
         save_responses_to_server()
         st.session_state.current_page = "final"
 
-# UPDATED: Save JSON formatted strings mapping directly to the requested columns
+# Save JSON formatted strings mapping directly to the columns
 def save_responses_to_server():
     """Pushes the aggregated experiment data into the Google Sheet with one row per participant."""
     conn = st.connection("gsheets", type=GSheetsConnection)
