@@ -89,7 +89,7 @@ if 'initialized' not in st.session_state:
             }
             
     except FileNotFoundError:
-        st.error("Error: 'questions_data_2.json' not found in the project directory. Please ensure the file exists.")
+        st.error("Error: 'questions_data.json' not found in the project directory. Please ensure the file exists.")
         st.stop()
     
     # Randomize the order of the blocks for this specific participant
