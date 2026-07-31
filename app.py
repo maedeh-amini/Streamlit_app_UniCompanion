@@ -29,24 +29,33 @@ def scroll_to_top():
 
 # --- GLOBAL COUNTER FUNCTION ---
 def get_and_increment_participant_counter():
-    """Reads a global counter file to assign sequential question blocks to new participants."""
-    counter_file = "participant_counter.json"
+    """Reads a global counter from Google Sheets to assign sequential question blocks."""
+    # Establish the connection
+    conn = st.connection("gsheets", type=GSheetsConnection)
     
-    # Read the current count
-    if os.path.exists(counter_file):
-        try:
-            with open(counter_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                count = data.get("count", 0)
-        except json.JSONDecodeError:
+    # 1. Fetch current counter (ttl=0 ensures we don't get a cached old value)
+    try:
+        counter_data = conn.read(worksheet="Counter", ttl=0)
+        
+        # Check if the dataframe is properly formatted
+        if counter_data is not None and not counter_data.empty and "count" in counter_data.columns:
+            val = counter_data["count"].iloc[0]
+            # Handle potential NaN or missing values
+            count = int(val) if pd.notna(val) else 0
+        else:
             count = 0
-    else:
+            
+    except Exception as e:
+        # Fallback if the sheet isn't set up or encounters a read error
+        print(f"Counter read error: {e}")
         count = 0
         
-    # Increment and save for the next participant who opens the app
-    with open(counter_file, "w", encoding="utf-8") as f:
-        json.dump({"count": count + 1}, f)
-        
+    # 2. Increment and save for the next participant
+    new_data = pd.DataFrame([{"count": count + 1}])
+    
+    # Write the updated dataframe back to the 'Counter' worksheet
+    conn.update(worksheet="Counter", data=new_data)
+    
     return count
 
 # --- 2. INITIALIZE DATA & SESSION STATE ---
@@ -57,13 +66,14 @@ if 'initialized' not in st.session_state:
     # Get this participant's global sequence number (0 for the 1st person, 1 for the 2nd, etc.)
     st.session_state.participant_index = get_and_increment_participant_counter()
     
-    st.session_state.current_page = "consent"  # Flow: consent -> demographics -> instructions -> question_eval -> pipeline_survey -> final
-    st.session_state.current_run = 1                         
-    st.session_state.current_q_index = 0                     
+    # Flow: consent -> demographics -> instructions -> role_reminder -> question_eval -> pipeline_survey -> final
+    st.session_state.current_page = "consent"  
+    st.session_state.current_run = 1                        
+    st.session_state.current_q_index = 0                    
     
     # Load Embedded Question Pools from a local JSON file
     try:
-        with open("questions_data.json", "r", encoding="utf-8") as f:
+        with open("questions_data_2.json", "r", encoding="utf-8") as f:
             raw_data = json.load(f)
             
             # --- BLOCK CONTROLLER ---
@@ -79,7 +89,7 @@ if 'initialized' not in st.session_state:
             }
             
     except FileNotFoundError:
-        st.error("Error: 'questions_data.json' not found in the project directory. Please ensure the file exists.")
+        st.error("Error: 'questions_data_2.json' not found in the project directory. Please ensure the file exists.")
         st.stop()
     
     # Randomize the order of the blocks for this specific participant
@@ -118,6 +128,9 @@ def start_experiment():
     }
     st.session_state.current_page = "instructions"
 
+def go_to_role_reminder():
+    st.session_state.current_page = "role_reminder"
+
 def initialize_next_block():
     current_block_name = st.session_state.block_order[st.session_state.current_run - 1]
     st.session_state.active_pipeline = current_block_name
@@ -146,7 +159,7 @@ def initialize_next_block():
     st.session_state.current_q_index = 0
     st.session_state.current_page = "question_eval"
 
-# Construct and append a dictionary for each question rated
+# UPDATED: Construct and append a dictionary for each question rated
 def next_question(faith_score, rel_score, recall_score, prec_score):
     q_item = st.session_state.active_questions[st.session_state.current_q_index]
     block_name = st.session_state.active_pipeline
@@ -154,7 +167,7 @@ def next_question(faith_score, rel_score, recall_score, prec_score):
     # Attempt to fetch a question_id, default to the index if it doesn't exist in the JSON
     q_id = q_item.get("question_id", st.session_state.current_q_index)
     
-    # Build the dictionary 
+    # Build the dictionary exactly as requested
     interaction_record = {
         "block_sequence_position": st.session_state.current_run,
         "assigned_pipeline": block_name,
@@ -176,7 +189,7 @@ def next_question(faith_score, rel_score, recall_score, prec_score):
     else:
         st.session_state.current_page = "pipeline_survey"
 
-# Format the survey dictionary 
+# UPDATED: Format the survey dictionary as requested
 def submit_pipeline_survey(survey_scores):
     survey_data = {
         "block_sequence_position": st.session_state.current_run,
@@ -196,7 +209,7 @@ def submit_pipeline_survey(survey_scores):
         save_responses_to_server()
         st.session_state.current_page = "final"
 
-# Save JSON formatted strings mapping directly to the columns
+# UPDATED: Save JSON formatted strings mapping directly to the requested columns
 def save_responses_to_server():
     """Pushes the aggregated experiment data into the Google Sheet with one row per participant."""
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -266,16 +279,17 @@ st.title("🤖 UniCompanion")
 # Force scroll to top on every page render
 scroll_to_top()
 
-progress_mapping = {"consent": 0.0, "demographics": 0.1, "instructions": 0.2, "question_eval": 0.4, "pipeline_survey": 0.8, "final": 1.0}
+# Added 'role_reminder' to the mapping
+progress_mapping = {"consent": 0.0, "demographics": 0.1, "instructions": 0.2, "role_reminder": 0.3, "question_eval": 0.4, "pipeline_survey": 0.8, "final": 1.0}
 base_progress = progress_mapping.get(st.session_state.current_page, 0.0)
-adjusted_progress = base_progress if base_progress in [0.0, 0.1, 0.2, 1.0] else base_progress + ((st.session_state.current_run - 1) * 0.15)
+adjusted_progress = base_progress if base_progress in [0.0, 0.1, 0.2, 0.3, 1.0] else base_progress + ((st.session_state.current_run - 1) * 0.15)
 st.progress(min(adjusted_progress, 1.0))
 
 col_meta1, col_meta2 = st.columns([1, 1])
 with col_meta1:
     st.caption(f"🆔 **Participant:** ID-{st.session_state.participant_id}")
 with col_meta2:
-    if st.session_state.current_page not in ["consent", "demographics", "instructions", "final"]:
+    if st.session_state.current_page not in ["consent", "demographics", "instructions", "role_reminder", "final"]:
         st.caption(f"🧱 **Progress:** Block {st.session_state.current_run} / {len(st.session_state.block_order)}")
 
 st.markdown("---")
@@ -293,8 +307,7 @@ if st.session_state.current_page == "consent":
         st.markdown("### Possible Benefits")
         st.write("This study may not provide direct personal benefits. However, the findings will contribute to research on Human-Computer Interaction (HCI), Explainable AI (XAI), and the development of more reliable, transparent conversational agents for educational institutions. Additionally, students who are studying cognitive science and psychology can receive 0.5 VP hours to compensate for their participation.")
         st.markdown("### Privacy and Data Protection")
-        st.write("All data collected during this experiment including your evaluation ratings, survey responses, and basic demographic questions will be recorded anonymously. No personal identifying information will be collected. Data will be stored securely on google cloud and accessed only by the authorised research team for research purposes.")
-        st.markdown("### Contact for Questions and Complaints")
+        st.write("All data collected during this experiment including your evaluation ratings, survey responses, and basic demographic questions will be recorded anonymously. No personal identifying information will be collected. The anonymized data will be stored securely on Google infrastructure (which includes servers located in the US) and will be accessed exclusively by the authorized research team for academic purposes.")
         st.write("If you have any questions, concerns, or complaints about this study, please contact:\n\n**Researcher:** mamini@uni-osnabrueck.de")
         st.markdown("---")
         st.markdown("#### Declaration of Consent")
@@ -310,15 +323,15 @@ elif st.session_state.current_page == "demographics":
     with st.form("demographics_form", border=True):
         st.session_state.age_group_input = st.selectbox("What is your age group? *", options=["18-24", "25-34", "35 and above"], index=None, placeholder="Select your age group")
         st.session_state.gender_input = st.selectbox("What is your gender? *", options=["Female", "Male", "Other", "Prefer not to say"], index=None, placeholder="Select gender")
-        st.session_state.education_level_input = st.selectbox("What is your current academic status? *", options=["Bachelor's student of Cognitive Science/ Psychology", "Master's student of Cognitive Science/ Psychology", "PhD student of Cognitive Science/ Psychology", "Other"], index=None, placeholder="Select academic status")
-        st.session_state.university_input = st.selectbox("Which university do you currently attend? *", options=["Osnabrück University", "Other"], index=None, placeholder="Select your university")
+        st.session_state.education_level_input = st.selectbox("What is your current academic status? *", options=["Bachelor's student of Cognitive Science / Psychology", "Master's student of Cognitive Science / Psychology", "PhD student of Cognitive Science / Psychology", "Student (Other discipline or university)", "Non-student (With prior university experience/graduated)", "Non-student (No prior university experience)"], index=None, placeholder="Select academic status")
+        st.session_state.university_input = st.selectbox("Which university do you currently attend? *", options=["Osnabrück University", "Other", "Not Applicable (Not a student)"], index=None, placeholder="Select your university")
         lang_levels = ["Beginner", "Intermediate", "Advanced", "Native"]
         st.session_state.english_proficiency_input = st.selectbox("How would you rate your English proficiency? *", options=lang_levels, index=None, placeholder="Select English level")
         st.session_state.german_proficiency_input = st.selectbox("How would you rate your German proficiency? *", options=lang_levels, index=None, placeholder="Select German level")
         st.session_state.chatbot_frequency_input = st.selectbox("How often do you use AI or chatbot tools? *", options=["Never", "Rarely / Less than once a week", "Around once a week", "Multiple times a week", "Daily"], index=None, placeholder="Select your usage frequency")
         
         st.markdown("<br>", unsafe_allow_html=True)
-        submit_demographics = st.form_submit_button("Start Evaluation →", use_container_width=True)
+        submit_demographics = st.form_submit_button("Continue to Instructions →", use_container_width=True)
         
         if submit_demographics:
             if not all([st.session_state.age_group_input, st.session_state.gender_input, st.session_state.education_level_input, st.session_state.english_proficiency_input, st.session_state.german_proficiency_input, st.session_state.chatbot_frequency_input]):
@@ -334,7 +347,7 @@ elif st.session_state.current_page == "instructions":
     
     with st.container(border=True):
         st.markdown("### Your Task")
-        st.write(f"You will evaluate {len(st.session_state.block_order)} different chatbots sequentially. Each chatbot represents a different experimental system configuration designed to answer student queries about Cognitive Science administration and study regulations at Osnabrück University.\n\nFor each chatbot, the evaluation is split into two phases:")
+        st.write(f"You will evaluate {len(st.session_state.block_order)} different chatbots sequentially. Each chatbot represents a different approach designed to answer student queries about Cognitive Science administration and study regulations at Osnabrück University.\n\nFor each chatbot, the evaluation is split into two phases:")
         st.markdown("#### Phase 1: System Evaluation")
         st.write("You will be presented with a series of interactions. For each interaction, you will see:\n* **The Student's Question:** The query submitted to the chatbot.\n* **The Ground Truth Response:** The verified, correct administrative answer.\n* **The Context:** The source documentation/regulations retrieved by the system.\n* **The Agent Output:** The response generated by the chatbot based on the context.\n\nFor each interaction, you must evaluate the chatbot's output using the provided sliding scales/metrics.\n\n💡 *Tip: If you are unsure about the definition of any evaluation metric, hover over or click the help sign [?] located next to the metric name for a detailed explanation.*")
         st.markdown("#### Phase 2: Post-Block Survey")
@@ -343,7 +356,27 @@ elif st.session_state.current_page == "instructions":
         st.write("* **Do not refresh or close the browser tab** during the experiment, as your progress will be lost.\n* Please complete the study in a quiet environment where you can focus.\n* Please evaluate the responses objectively based on the provided context and ground truth, rather than personal assumptions about university rules.")
         
         st.markdown("<br>", unsafe_allow_html=True)
-        st.button(f"Begin Block {st.session_state.current_run}", on_click=initialize_next_block, use_container_width=True)
+        # Changed button to route to the new role_reminder page
+        st.button("Proceed to Scenario →", on_click=go_to_role_reminder, use_container_width=True)
+
+# PAGE: ROLE REMINDER (NEW)
+elif st.session_state.current_page == "role_reminder":
+    st.subheader("🎯 Scenario & Role")
+    
+    with st.container(border=True):
+        st.markdown("""
+Imagine you are working for the **Examination Office** at Osnabrück University. The university is testing *UniCompanion*, a new AI assistant designed to answer student queries about study regulations. 
+
+Your critical task is to evaluate **4 different versions** of the AI chatbot and assess their responses for accuracy against official university regulations before the system is released to the student body.
+
+<br>
+<div style="text-align: center;">
+    <h4><strong>Please pay close attention to the details and evaluate each output carefully.</strong></h4>
+</div>
+""", unsafe_allow_html=True)
+        
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.button(f"Begin Block {st.session_state.current_run}", on_click=initialize_next_block, use_container_width=True)
 
 # PAGE: QUESTION EVALUATION LOOP
 elif st.session_state.get('current_page') == "question_eval":
@@ -383,11 +416,16 @@ elif st.session_state.get('current_page') == "question_eval":
         ground_truth = "Unknown pipeline."
 
     
-    st.subheader(f"🔍 System Evaluation (Item {q_idx + 1} of {len(st.session_state.active_questions)})")
+    # --- UPDATED: Chatbot Tracker Logic (Formatted inline as requested) ---
+    ordinal_map = {1: "First", 2: "Second", 3: "Third", 4: "Fourth"}
+    bot_ordinal = ordinal_map.get(st.session_state.current_run, f"{st.session_state.current_run}th")
+    
+    st.subheader(f"🔍 System Evaluation  |  {bot_ordinal} Chatbot  |  Question {q_idx + 1} of {len(st.session_state.active_questions)}")
+    
     st.markdown(
-    "Please evaluate the chatbot's performance using the sliding scales below.\n\n"
-    "##### **Note: The chatbot generates its response based on the retrieved context.**"
-)
+        "Please evaluate the chatbot's performance using the sliding scales below.\n\n"
+        "##### **Note: The chatbot generates its response based on the retrieved context.**"
+    )
     st.markdown("---")
     
     # ==========================
@@ -435,12 +473,12 @@ elif st.session_state.get('current_page') == "question_eval":
     st.markdown("### 📊 Performance Assessment")
     st.write("Please adjust the sliders below (**0 = Complete Failure**, **100 = Perfect Alignment**):")
 
-    st.warning("💡 **Important:** Click the **[?]** icon next to each metric for exact instructions on what to compare before assigning your score.")
+    st.warning("💡 **Important:** Click the **[?]** next to each metric to see what to compare before assigning your score.")
 
-    s_faith = st.slider("Rate Faithfulness (Factuality / Truthfulness):", min_value=0, max_value=100, value=50, step=1, key=f"faith_q_{q_idx}_r_{st.session_state.current_run}", help="👉 COMPARE: Chatbot Response vs. Retrieved Context\n\n100 = Every claim made in the Chatbot Response can be directly inferred from the provided Context.")
+    s_faith = st.slider("Rate Faithfulness (Factuality / Truthfulness):", min_value=0, max_value=100, value=50, step=1, key=f"faith_q_{q_idx}_r_{st.session_state.current_run}", help="👉 COMPARE: Chatbot Response vs. Retrieved Context\n\n100 = Every claim made in the Chatbot Response can be directly inferred from the Retrieved Context.")
     s_relevancy = st.slider("Rate Answer Relevancy:", min_value=0, max_value=100, value=50, step=1, key=f"rel_q_{q_idx}_r_{st.session_state.current_run}", help="👉 COMPARE: Chatbot Response vs. Student Question\n\n100 = Every statement in the Chatbot Response directly answers the Student Question without any unrelated text.")
-    s_recall = st.slider("Rate Contextual Recall:", min_value=0, max_value=100, value=50, step=1, key=f"rec_q_{q_idx}_r_{st.session_state.current_run}", help="👉 COMPARE: Retrieved Context vs. Ground Truth (Expected Output)\n\n100 = Every factual statement in the Ground Truth is successfully verified and backed up by the retrieved Context.")
-    s_precision = st.slider("Rate Contextual Precision:", min_value=0, max_value=100, value=50, step=1, key=f"prec_q_{q_idx}_r_{st.session_state.current_run}", help="👉 COMPARE: Retrieved Context vs. Student Question\n\n100 = The provided Context is highly relevant and perfectly aligns with the Question asked.")
+    s_recall = st.slider("Rate Contextual Recall:", min_value=0, max_value=100, value=50, step=1, key=f"rec_q_{q_idx}_r_{st.session_state.current_run}", help="👉 COMPARE: Retrieved Context vs. Ground Truth (Expected Output)\n\n100 = The Retrieved Context successfully verifies every factual statement in the Ground Truth.")
+    s_precision = st.slider("Rate Contextual Precision:", min_value=0, max_value=100, value=50, step=1, key=f"prec_q_{q_idx}_r_{st.session_state.current_run}", help="👉 COMPARE: Retrieved Context vs. Student Question\n\n100 = The Retrieved Context is highly relevant and perfectly aligns with the Question asked.")
     
     st.markdown("<br>", unsafe_allow_html=True)
     st.button("Next Phase →", on_click=next_question, args=(s_faith, s_relevancy, s_recall, s_precision), use_container_width=True)
@@ -481,7 +519,7 @@ elif st.session_state.current_page == "pipeline_survey":
         st.markdown("<hr style='margin: 8px 0px; border-top: 1px dashed #ccc;'>", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.button("Submit Survey Data & Continue →", on_click=submit_pipeline_survey, args=(current_survey_answers,), use_container_width=True)
+    st.button("Submit Survey & Proceed to Final Step →", on_click=submit_pipeline_survey, args=(current_survey_answers,), use_container_width=True)
 
 # PAGE: FINAL SUBMISSION / DEBRIEFING
 elif st.session_state.current_page == "final":
@@ -543,3 +581,8 @@ elif st.session_state.current_page == "final":
             if skip_email:
                 st.session_state.study_completed = True
                 st.rerun()
+
+
+
+
+
