@@ -38,7 +38,7 @@ if 'initialized' not in st.session_state:
     
     # Load JSON
     try:
-        with open("questions_data_2.json", "r", encoding="utf-8") as f:
+        with open("questions_data.json", "r", encoding="utf-8") as f:
             raw_data = json.load(f)
             active_blocks = [
                 "Semantic_Low_Explainable", 
