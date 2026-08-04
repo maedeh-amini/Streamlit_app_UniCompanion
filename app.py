@@ -50,7 +50,7 @@ if 'initialized' not in st.session_state:
                 k: v for k, v in raw_data.items() if k in active_blocks
             }
     except FileNotFoundError:
-        st.error("Error: 'questions_data_2.json' not found.")
+        st.error("Error: 'questions_data.json' not found.")
         st.stop()
     
     st.session_state.block_order = random.sample(list(st.session_state.question_pools.keys()), len(st.session_state.question_pools))
