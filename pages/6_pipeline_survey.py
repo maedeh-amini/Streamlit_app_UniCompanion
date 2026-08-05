@@ -119,8 +119,22 @@ current_survey_answers = {}
 for idx, item in enumerate(items):
     st.markdown(f"**Item {idx+1}:** {item['text']}")
     dict_key = f"item{idx+1}"
-    choice = st.radio(label=f"label_{item['key']}", options=likert_options, index=2, key=f"grid_radio_{item['key']}_run_{st.session_state.current_run}", horizontal=True, label_visibility="collapsed")
-    current_survey_answers[dict_key] = likert_options.index(choice) + 1
+    
+    # Removed index=2 to enforce explicit choice by setting index=None
+    choice = st.radio(
+        label=f"label_{item['key']}", 
+        options=likert_options, 
+        index=None, 
+        key=f"grid_radio_{item['key']}_run_{st.session_state.current_run}", 
+        horizontal=True, 
+        label_visibility="collapsed"
+    )
+    
+    if choice is not None:
+        current_survey_answers[dict_key] = likert_options.index(choice) + 1
+    else:
+        current_survey_answers[dict_key] = None
+        
     st.markdown("<hr style='margin: 8px 0px; border-top: 1px dashed #ccc;'>", unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -137,9 +151,9 @@ else:
     button_text = "Submit Survey & Proceed to Final Step →"
 
 if st.button(button_text, use_container_width=True):
-    # Pass the dictionary directly into the function
-    submit_pipeline_survey(current_survey_answers)
-
-
-
-
+    # Validate that all items have been answered before moving forward
+    if None in current_survey_answers.values():
+        st.error("⚠️ Please answer all items before proceeding to the next part.")
+    else:
+        # Pass the dictionary directly into the function
+        submit_pipeline_survey(current_survey_answers)
